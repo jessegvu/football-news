@@ -1,4 +1,7 @@
-from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect
+from django.urls import reverse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST   # <-- tambahkan ini
 from main.forms import NewsForm
 from main.models import News
 from django.http import HttpResponse, JsonResponse
@@ -7,13 +10,10 @@ from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.html import strip_tags
+from django.urls import reverse
 import json
 import datetime
 from django.http import HttpResponseRedirect
-from django.urls import reverse
-from django.views.decorators.http import require_POST
 import requests
 import xml.etree.ElementTree as ET
 
@@ -51,19 +51,19 @@ def show_main(request):
     }
     return render(request, "main.html",context)
 
+@login_required(login_url='/login/')
 def create_news(request):
-    form = NewsForm(request.POST or None)
-
-    if form.is_valid() and request.method == 'POST':
-        news_entry = form.save(commit = False)
-        news_entry.user = request.user
-        news_entry.save()
-        return redirect('main:show_main')
-
-    context = {
-        'form': form
-    }
-
+    if request.method == "POST":
+        form = NewsForm(request.POST)
+        if form.is_valid():
+            news_entry = form.save(commit=False)
+            # request.user sekarang pasti User karena @login_required
+            news_entry.user = request.user
+            news_entry.save()
+            return HttpResponseRedirect(reverse("main:view_news"))
+    else:
+        form = NewsForm()
+    context = {"form": form}
     return render(request, "create_news.html", context)
 
 @login_required(login_url='/login')
@@ -149,9 +149,13 @@ def login_user(request):
       if form.is_valid():
         user = form.get_user()
         login(request, user)
-        response = HttpResponseRedirect(reverse("main:show_main"))
+        response = HttpResponseRedirect(reverse("main:view_news"))
         response.set_cookie('last_login', str(datetime.datetime.now()))
-        return response
+        authenticated = True
+        # Redirect based on user type or other logic if needed
+        if authenticated:
+            # sebelumnya mungkin: return HttpResponseRedirect(reverse("main:show_main"))
+            return HttpResponseRedirect(reverse("main:view_news"))   # <-- ganti ke view yang ada
    else:
       form = AuthenticationForm(request)
    context = {'form': form}
@@ -230,7 +234,7 @@ def create_news_flutter(request):
 
 def view_news(request):
     """Halaman untuk menampilkan berita (untuk web)"""
-    news_list = News.objects.all().order_by('-date_created')
+    news_list = News.objects.all().order_by('-created_at')
     context = {
         'news': news_list
     }
@@ -240,7 +244,7 @@ def view_news(request):
 def get_news_json(request):
     """API endpoint untuk mendapatkan semua berita dalam format JSON"""
     try:
-        news_list = News.objects.all().order_by('-date_created')
+        news_list = News.objects.all().order_by('-created_at')
         data = []
         
         for news in news_list:
@@ -251,7 +255,7 @@ def get_news_json(request):
                 'category': news.category,
                 'thumbnail': news.thumbnail if news.thumbnail else '',
                 'is_featured': news.is_featured,
-                'date_created': news.date_created.isoformat(),
+                'created_at': news.created_at.isoformat(),
                 'user': news.user.username if news.user else 'Unknown',
             })
         

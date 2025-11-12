@@ -4,7 +4,10 @@ from . import views
 app_name = 'main'
 
 urlpatterns = [
-    path('', views.view_news, name='view_news'),
+    # root -> show_main (templates use 'main:show_main')
+    path('', views.show_main, name='show_main'),
+    # keep view_news available for code that expects 'main:view_news'
+    path('view-news/', views.view_news, name='view_news'),
     path('json/', views.get_news_json, name='get_news_json'),
     path('create-news/', views.create_news, name='create_news'),
     path('news/<str:id>/', views.show_news, name='show_news'),
