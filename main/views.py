@@ -1,19 +1,39 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from main.forms import NewsForm
 from main.models import News
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.core import serializers
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-import datetime
-from django.http import HttpResponseRedirect, JsonResponse
-from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
 from django.utils.html import strip_tags
+import json
+import datetime
+from django.http import HttpResponseRedirect
+from django.urls import reverse
+from django.views.decorators.http import require_POST
+import requests
+import xml.etree.ElementTree as ET
 
+def proxy_image(request):
+    image_url = request.GET.get('url')
+    if not image_url:
+        return HttpResponse('No URL provided', status=400)
+    
+    try:
+        # Fetch image from external source
+        response = requests.get(image_url, timeout=10)
+        response.raise_for_status()
+        
+        # Return the image with proper content type
+        return HttpResponse(
+            response.content,
+            content_type=response.headers.get('Content-Type', 'image/jpeg')
+        )
+    except requests.RequestException as e:
+        return HttpResponse(f'Error fetching image: {str(e)}', status=500)
 
 @login_required(login_url='/login')
 def show_main(request):
@@ -184,7 +204,65 @@ def add_news_entry_ajax(request):
     return HttpResponse(b"CREATED", status=201)
 
 @csrf_exempt
-@require_POST
-def add_news_entry_ajax(request):
-    title = strip_tags(request.POST.get("title")) # strip HTML tags!
-    content = strip_tags(request.POST.get("content")) # strip HTML tags!
+def create_news_flutter(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        title = strip_tags(data.get("title", ""))  # Strip HTML tags
+        content = strip_tags(data.get("content", ""))  # Strip HTML tags
+        category = data.get("category", "")
+        thumbnail = data.get("thumbnail", "")
+        is_featured = data.get("is_featured", False)
+        user = request.user
+        
+        new_news = News(
+            title=title, 
+            content=content,
+            category=category,
+            thumbnail=thumbnail,
+            is_featured=is_featured,
+            user=user
+        )
+        new_news.save()
+        
+        return JsonResponse({"status": "success"}, status=200)
+    else:
+        return JsonResponse({"status": "error"}, status=401)
+
+def view_news(request):
+    """Halaman untuk menampilkan berita (untuk web)"""
+    news_list = News.objects.all().order_by('-date_created')
+    context = {
+        'news': news_list
+    }
+    return render(request, 'main.html', context)
+
+@csrf_exempt
+def get_news_json(request):
+    """API endpoint untuk mendapatkan semua berita dalam format JSON"""
+    try:
+        news_list = News.objects.all().order_by('-date_created')
+        data = []
+        
+        for news in news_list:
+            data.append({
+                'id': str(news.id),
+                'title': news.title,
+                'content': news.content,
+                'category': news.category,
+                'thumbnail': news.thumbnail if news.thumbnail else '',
+                'is_featured': news.is_featured,
+                'date_created': news.date_created.isoformat(),
+                'user': news.user.username if news.user else 'Unknown',
+            })
+        
+        return JsonResponse({
+            'status': True,
+            'data': data,
+            'message': 'Success fetching news data'
+        }, status=200)
+    except Exception as e:
+        print(f'[DEBUG] Error in get_news_json: {str(e)}')
+        return JsonResponse({
+            'status': False,
+            'message': f'Error: {str(e)}'
+        }, status=500)
